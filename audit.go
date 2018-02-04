@@ -11,12 +11,17 @@ import (
     "goji.io/pat"
     "gopkg.in/mgo.v2"
     "gopkg.in/mgo.v2/bson"
+
+    "github.com/savaki/swag"
+    "github.com/savaki/swag/endpoint"
+    //"github.com/savaki/swag/swagger"
 )
 
 func ErrorWithJSON(w http.ResponseWriter, message string, code int) {  
     w.Header().Set("Content-Type", "application/json; charset=utf-8")
     w.WriteHeader(code)
     fmt.Fprintf(w, "{message: %q}", message)
+    //need to add an optional Error response object
 }
 
 func ResponseWithJSON(w http.ResponseWriter, json []byte, code int) {  
@@ -36,7 +41,8 @@ type Event struct {
     Author string    `json:"author"`
 }
 
-func main() {  
+func main() {
+
     session, err := mgo.Dial("localhost")
     if err != nil {
         panic(err)
@@ -52,6 +58,7 @@ func main() {
     mux.HandleFunc(pat.Get("/event/:id"), eventById(session))
     mux.HandleFunc(pat.Put("/event/:id"), updateEvent(session))
     mux.HandleFunc(pat.Delete("/event/:id"), deleteEvent(session))
+    mux.HandleFunc(pat.Get("/swagger"), generateSwagger())
     http.ListenAndServe("localhost:8080", mux)
 }
 
@@ -72,6 +79,31 @@ func ensureIndex(s *mgo.Session) {
     if err != nil {
         panic(err)
     }
+}
+
+func generateSwagger() func(w http.ResponseWriter, r *http.Request) { 
+    create := endpoint.New("post", "/event", "Add a new event to the audit log",
+        endpoint.Handler(addEvent),
+        endpoint.Description("Additional information on adding an event to the audit log"),
+        endpoint.Body(Event{}, "Event object that needs to be added to the audit log", true),
+        endpoint.Response(http.StatusOK, Event{}, "Successfully added audit"),
+    )
+
+    getAll := endpoint.New("get", "/event", "Return all the events",
+        endpoint.Handler(allEvents),
+        endpoint.Description("Return all the events in the audit log matching the specified criteria"),
+        endpoint.Response(http.StatusOK, Event{}, "Successful operation"),
+        //need to add error object
+        //endpoint.Response(http.StatusInternalServerError, Error{}, "Oops ... something went wrong"),
+    ) 
+
+    api := swag.New(
+        swag.Title("Audit API documentation"),
+        swag.Endpoints(create, getAll),
+    )
+
+    enableCors := true
+    return api.Handler(enableCors)
 }
 
 func allEvents(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {  
