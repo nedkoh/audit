@@ -17,6 +17,17 @@ import (
     //"github.com/savaki/swag/swagger"
 )
 
+const (
+    dburl = "localhost"
+    database = "audit"
+    collection = "events"
+
+    //params
+    entity = "entity"
+    action = "action"
+
+)
+
 func ErrorWithJSON(w http.ResponseWriter, message string, code int) {  
     w.Header().Set("Content-Type", "application/json; charset=utf-8")
     w.WriteHeader(code)
@@ -30,20 +41,19 @@ func ResponseWithJSON(w http.ResponseWriter, json []byte, code int) {
     w.Write(json)
 }
 
+
 type Event struct {
     Id   bson.ObjectId `json:"id" bson:"_id,omitempty"`
-    //Id    string     `json:"id"` `bson:"_id,"` 
     Entity   string  `json:"entity"`
     Action  string   `json:"action"`
     Event   string   `json:"event"`
-    Time time.Time   `json:"time"` 
-    //Time    int32    `json:"time"`    
+    Time time.Time   `json:"time"`   
     Author string    `json:"author"`
 }
 
 func main() {
 
-    session, err := mgo.Dial("localhost")
+    session, err := mgo.Dial(dburl)
     if err != nil {
         panic(err)
     }
@@ -66,7 +76,7 @@ func ensureIndex(s *mgo.Session) {
     session := s.Copy()
     defer session.Close()
 
-    c := session.DB("audit").C("events")
+    c := session.DB(database).C(collection)
 
     index := mgo.Index{
         Key:        []string{"Id"},
@@ -111,10 +121,41 @@ func allEvents(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
         session := s.Copy()
         defer session.Close()
 
-        c := session.DB("audit").C("events")
+        c := session.DB(database).C(collection)
+
+        //get the param
+        //entity := r.URL.Query().Get(entity)
+        //log.Println("Entity " + entity)
+
+        //params := map[string]string{
+        //    "entity":   "User",
+        //    "action":   "CREATE",
+        //}
+
+        fmt.Println("Number of params: ", len(r.URL.Query()))
+        //generate mongo expression from the parameter map
+        //e.g. convert the map to map of maps where multiples
+        expression := make(bson.M)
+        for key, value := range r.URL.Query() {
+            if (len(value) > 1) {
+                expression[key] = bson.M{"$in":value}
+            } else {
+                expression[key] = value[0]
+                fmt.Println("here")
+            }
+        }
+        //print conversion
+        fmt.Println(r.URL.Query())
+        fmt.Println(expression)
 
         var events []Event
-        err := c.Find(bson.M{}).All(&events)
+        //bson.M{"action": "CREATE"}
+        //bson.M{"action": bson.M{"$in": []string{"CREATE", "UPDATE"}}}
+        //.Sort("-Time")
+
+        err := c.Find(expression).Sort("-time").Limit(100).Iter().All(&events)
+        //events = c.Find(expression).Sort("-time").Limit(100).Iter()
+
         if err != nil {
             ErrorWithJSON(w, "Database error", http.StatusInternalServerError)
             log.Println("Failed get all events: ", err)
@@ -143,7 +184,7 @@ func addEvent(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
             return
         }
 
-        c := session.DB("audit").C("events")
+        c := session.DB(database).C(collection)
         //event.Id = bson.NewObjectId()
         //log.Println("Created Id: ", event.Id)
         err = c.Insert(event)
@@ -172,7 +213,7 @@ func eventById(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
         id := bson.ObjectIdHex(pat.Param(r, "id"))
 
 
-        c := session.DB("audit").C("events")
+        c := session.DB(database).C(collection)
 
         var event Event
         err := c.FindId(id).One(&event)
@@ -211,7 +252,7 @@ func updateEvent(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
             return
         }
 
-        c := session.DB("audit").C("events")
+        c := session.DB(database).C(collection)
 
         err = c.UpdateId(id, &event)
         if err != nil {
